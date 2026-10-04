@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>별똥별 피하기</title>
+<style>
+  html,body{margin:0;height:100%;background:#05060f;color:#fff;font-family:system-ui,sans-serif;overflow:hidden}
+  canvas{display:block;width:100%;height:100%;cursor:none;touch-action:none}
+  #hud{position:fixed;top:12px;left:16px;right:16px;display:flex;justify-content:space-between;font-size:18px;pointer-events:none;text-shadow:0 0 6px #000}
+  #msg{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;pointer-events:none;gap:8px}
+  #msg h1{font-size:44px;margin:0}
+  #msg p{margin:0;opacity:.8}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud"><span id="score">점수 0</span><span id="best">최고 0</span></div>
+<div id="msg"><h1>별똥별 피하기</h1><p>마우스·터치·방향키로 움직이세요</p><p>클릭 또는 스페이스로 시작</p></div>
+<script>
+const cv=document.getElementById('c'),ctx=cv.getContext('2d');
+const scoreEl=document.getElementById('score'),bestEl=document.getElementById('best'),msg=document.getElementById('msg');
+let W,H;
+function resize(){const d=devicePixelRatio||1;W=innerWidth;H=innerHeight;cv.width=W*d;cv.height=H*d;ctx.setTransform(d,0,0,d,0,0)}
+addEventListener('resize',resize);resize();
+
+let best=0;try{best=+localStorage.getItem('starDodgeBest')||0}catch(e){}
+bestEl.textContent='최고 '+best;
+
+const stars=Array.from({length:80},()=>({x:Math.random(),y:Math.random(),s:Math.random()*1.5+.3}));
+let ship,rocks,sparks,state='ready',t,score,spawn,keys={};
+
+function reset(){
+  ship={x:W/2,y:H-80,tx:W/2,ty:H-80};
+  rocks=[];sparks=[];t=0;score=0;spawn=0;
+}
+reset();
+
+function start(){if(state!=='play'){reset();state='play';msg.style.display='none'}}
+function die(){
+  state='over';
+  for(let i=0;i<40;i++){const a=Math.random()*6.28,v=Math.random()*5+1;sparks.push({x:ship.x,y:ship.y,vx:Math.cos(a)*v,vy:Math.sin(a)*v,l:1})}
+  const s=Math.floor(score);
+  if(s>best){best=s;try{localStorage.setItem('starDodgeBest',best)}catch(e){}bestEl.textContent='최고 '+best}
+  msg.innerHTML='<h1>게임 오버</h1><p>점수 '+s+'</p><p>클릭 또는 스페이스로 다시 시작</p>';
+  msg.style.display='flex';
+}
+
+function move(x,y){ship.tx=x;ship.ty=y}
+cv.addEventListener('pointermove',e=>move(e.clientX,e.clientY));
+cv.addEventListener('pointerdown',e=>{move(e.clientX,e.clientY);start()});
+addEventListener('keydown',e=>{
+  if(e.key===' '){start();e.preventDefault()}
+  keys[e.key]=true;
+});
+addEventListener('keyup',e=>keys[e.key]=false);
+
+let last=performance.now();
+function loop(now){
+  const dt=Math.min((now-last)/16.67,3);last=now;
+  update(dt);draw();requestAnimationFrame(loop);
+}
+
+function update(dt){
+  for(const s of stars){s.y+=s.s*.002*dt;if(s.y>1)s.y=0}
+  for(const p of sparks){p.x+=p.vx*dt;p.y+=p.vy*dt;p.l-=.02*dt}
+  sparks=sparks.filter(p=>p.l>0);
+  if(state!=='play')return;
+
+  const k=6*dt;
+  if(keys.ArrowLeft||keys.a)ship.tx-=k*2;
+  if(keys.ArrowRight||keys.d)ship.tx+=k*2;
+  if(keys.ArrowUp||keys.w)ship.ty-=k*2;
+  if(keys.ArrowDown||keys.s)ship.ty+=k*2;
+  ship.tx=Math.max(14,Math.min(W-14,ship.tx));
+  ship.ty=Math.max(14,Math.min(H-14,ship.ty));
+  ship.x+=(ship.tx-ship.x)*.25*dt;
+  ship.y+=(ship.ty-ship.y)*.25*dt;
+
+  t+=dt;score+=dt/60*10;
+  const level=1+t/600;
+  spawn-=dt;
+  if(spawn<=0){
+    spawn=Math.max(8,40/level);
+    const r=Math.random()*14+8;
+    rocks.push({x:Math.random()*W,y:-30,r,vx:(Math.random()-.5)*2,vy:(Math.random()*2+2)*Math.min(level,3)});
+  }
+  for(const r of rocks){
+    r.x+=r.vx*dt;r.y+=r.vy*dt;
+    if(Math.hypot(r.x-ship.x,r.y-ship.y)<r.r+9){die();break}
+  }
+  rocks=rocks.filter(r=>r.y<H+40);
+  scoreEl.textContent='점수 '+Math.floor(score);
+}
+
+function draw(){
+  ctx.fillStyle='#05060f';ctx.fillRect(0,0,W,H);
+  ctx.fillStyle='#fff';
+  for(const s of stars){ctx.globalAlpha=.4+s.s/3;ctx.fillRect(s.x*W,s.y*H,s.s,s.s)}
+  ctx.globalAlpha=1;
+
+  for(const r of rocks){
+    const g=ctx.createLinearGradient(r.x,r.y-r.r*5,r.x,r.y);
+    g.addColorStop(0,'rgba(255,160,60,0)');g.addColorStop(1,'rgba(255,200,100,.7)');
+    ctx.fillStyle=g;
+    ctx.beginPath();ctx.moveTo(r.x-r.r,r.y);ctx.lineTo(r.x-r.vx*r.r*2,r.y-r.r*5);ctx.lineTo(r.x+r.r,r.y);ctx.fill();
+    ctx.fillStyle='#ffb347';ctx.beginPath();ctx.arc(r.x,r.y,r.r,0,6.28);ctx.fill();
+    ctx.fillStyle='#c76a1a';ctx.beginPath();ctx.arc(r.x-r.r*.3,r.y-r.r*.2,r.r*.3,0,6.28);ctx.fill();
+  }
+
+  if(state!=='over'){
+    ctx.save();ctx.translate(ship.x,ship.y);
+    ctx.fillStyle='#7df9ff';
+    ctx.beginPath();ctx.moveTo(0,-14);ctx.lineTo(10,10);ctx.lineTo(0,5);ctx.lineTo(-10,10);ctx.closePath();ctx.fill();
+    ctx.fillStyle='#ff7a59';ctx.beginPath();ctx.moveTo(-4,8);ctx.lineTo(0,16+Math.random()*6);ctx.lineTo(4,8);ctx.fill();
+    ctx.restore();
+  }
+  for(const p of sparks){ctx.globalAlpha=p.l;ctx.fillStyle='#ffd86b';ctx.fillRect(p.x,p.y,3,3)}
+  ctx.globalAlpha=1;
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
